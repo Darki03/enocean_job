@@ -8,8 +8,7 @@ try:
     import queue
 except ImportError:
     import Queue as queue
-
-from enoceanjob.protocol.packet import Packet, UTETeachInPacket
+from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG
 from enoceanjob.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 
 
@@ -36,6 +35,7 @@ class Communicator(threading.Thread):
         # Should new messages be learned automatically? Defaults to True.
         # TODO: Not sure if we should use CO_WR_LEARNMODE??
         self.teach_in = teach_in
+        self.chained = MSGChainer()
 
     def _get_from_send_queue(self):
         ''' Get message from send queue, if one exists '''
@@ -49,10 +49,25 @@ class Communicator(threading.Thread):
         return None
 
     def send(self, packet):
+        
         if not isinstance(packet, Packet):
             self.logger.error('Object to send must be an instance of Packet')
             return False
+
         self.transmit.put(packet)
+        return True
+    
+    def send_list(self, packet_list):
+        if not isinstance(packet_list, list):
+            self.logger.error('Object to send must be a list of Packet')
+            return False
+        
+        for pckt in packet_list:
+            if not isinstance(pckt, Packet):
+                self.logger.warn('Object in the list is not a Packet')
+                continue
+            self.transmit.put(pckt)
+        
         return True
 
     def stop(self):
@@ -76,11 +91,19 @@ class Communicator(threading.Thread):
                     self.logger.info('Sending response to UTE teach-in.')
                     self.send(response_packet)
 
+
                 if self.__callback is None:
                     self.receive.put(packet)
                 else:
                     self.__callback(packet)
+                
                 self.logger.debug(packet)
+
+                if isinstance(packet, ChainedMSG):
+                    virtual = self.chained.parse_CDM(packet)
+                    if virtual:
+                        self.receive.put(virtual)
+                        self.logger.debug(virtual)
 
     @property
     def base_id(self):
@@ -90,7 +113,7 @@ class Communicator(threading.Thread):
             return self._base_id
 
         # Send COMMON_COMMAND 0x08, CO_RD_IDBASE request to the module
-        self.send(Packet(PACKET.COMMON_COMMAND, data=[0x08]))
+        self.send(Packet(PACKET.COMMON_COMMAND, data=[0x03]))
         # Loop over 10 times, to make sure we catch the response.
         # Thanks to timeout, shouldn't take more than a second.
         # Unfortunately, all other messages received during this time are ignored.
@@ -98,9 +121,9 @@ class Communicator(threading.Thread):
             try:
                 packet = self.receive.get(block=True, timeout=0.1)
                 # We're only interested in responses to the request in question.
-                if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK and len(packet.response_data) == 4:  # noqa: E501
+                if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK and len(packet.response_data) == 32:
                     # Base ID is set in the response data.
-                    self._base_id = packet.response_data
+                    self._base_id = packet.response_data[8:12]
                     # Put packet back to the Queue, so the user can also react to it if required...
                     self.receive.put(packet)
                     break

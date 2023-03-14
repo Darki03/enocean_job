@@ -3,10 +3,13 @@ from __future__ import print_function, unicode_literals, division, absolute_impo
 import logging
 from collections import OrderedDict
 
+import math
 import enoceanjob.utils
 from enoceanjob.protocol import crc8
+from enoceanjob.protocol import security
+from Crypto.Random import get_random_bytes
 from enoceanjob.protocol.eep import EEP
-from enoceanjob.protocol.constants import PACKET, RORG, PARSE_RESULT, DB0, DB2, DB3, DB4, DB6
+from enoceanjob.protocol.constants import PACKET, RORG, PARSE_RESULT, DECRYPT_RESULT, DB0, DB2, DB3, DB4, DB6, SLF_INFO
 
 
 class Packet(object):
@@ -48,26 +51,20 @@ class Packet(object):
         self.parse()
 
     def __str__(self):
-        return '0x%02X %s %s %s' % (
-            self.packet_type,
-            [hex(o) for o in self.data],
-            [hex(o) for o in self.optional],
-            self.parsed)
+        return '0x%02X %s %s %s' % (self.packet_type, [hex(o) for o in self.data], [hex(o) for o in self.optional], self.parsed)
 
     def __unicode__(self):
         return self.__str__()
 
     def __eq__(self, other):
-        return self.packet_type == other.packet_type and self.rorg == other.rorg \
-            and self.data == other.data and self.optional == other.optional
+        return self.packet_type == other.packet_type and self.rorg == other.rorg and self.data == other.data and self.optional == other.optional
 
     @property
     def _bit_data(self):
         # First and last 5 bits are always defined, so the data we're modifying is between them...
         # TODO: This is valid for the packets we're currently manipulating.
         # Needs the redefinition of Packet.data -> Packet.message.
-        # Packet.data would then only have the actual, documented data-bytes.
-        # Packet.message would contain the whole message.
+        # Packet.data would then only have the actual, documented data-bytes. Packet.message would contain the whole message.
         # See discussion in issue #14
         return enoceanjob.utils.to_bitarray(self.data[1:len(self.data) - 5], (len(self.data) - 6) * 8)
 
@@ -153,6 +150,8 @@ class Packet(object):
             # Need to handle UTE Teach-in here, as it's a separate packet type...
             if data[0] == RORG.UTE:
                 packet = UTETeachInPacket(packet_type, data, opt_data)
+            elif data[0] in [RORG.CDM, RORG.SEC_CDM]:
+                packet = ChainedMSG(packet_type, data, opt_data)
             else:
                 packet = RadioPacket(packet_type, data, opt_data)
         elif packet_type == PACKET.RESPONSE:
@@ -168,7 +167,7 @@ class Packet(object):
     def create(packet_type, rorg, rorg_func, rorg_type, direction=None, command=None,
                destination=None,
                sender=None,
-               learn=False, **kwargs):
+               learn=False, mid=None, **kwargs):
         '''
         Creates an packet ready for sending.
         Uses rorg, rorg_func and rorg_type to determine the values set based on EEP.
@@ -199,8 +198,8 @@ class Packet(object):
         # TODO: Should use the correct Base ID as default.
         #       Might want to change the sender to be an offset from the actual address?
         if sender is None:
-            Packet.logger.warning('Replacing sender with default address.')
-            sender = [0xDE, 0xAD, 0xBE, 0xEF]
+            Packet.logger.warning('Replacing sender with 0x00 address, BaseID will be used.')
+            sender = [0x00, 0x00, 0x00, 0x00]
 
         if not isinstance(destination, list) or len(destination) != 4:
             raise ValueError('Destination must a list containing 4 (numeric) values.')
@@ -212,7 +211,7 @@ class Packet(object):
         packet.rorg = rorg
         packet.data = [packet.rorg]
         # Select EEP at this point, so we know how many bits we're dealing with (for VLD).
-        packet.select_eep(rorg_func, rorg_type, direction, command)
+        packet.select_eep(rorg_func, rorg_type, direction, command, mid)
 
         # Initialize data depending on the profile.
         if rorg in [RORG.RPS, RORG.BS1]:
@@ -220,14 +219,19 @@ class Packet(object):
         elif rorg == RORG.BS4:
             packet.data.extend([0, 0, 0, 0])
         else:
-            packet.data.extend([0] * int(packet._profile.get('bits', '1')))
+            data_size = 0
+            for offs in packet._profile.find_all('bitsize'):
+                if offs.find_parent('condition') is None:
+                    data_size += int(offs.string)
+            byte_size = int(data_size/8)    
+            packet.data.extend([0] * byte_size)
         packet.data.extend(sender)
         packet.data.extend([0])
         # Always use sub-telegram 3, maximum dbm (as per spec, when sending),
         # and no security (security not supported as per EnOcean Serial Protocol).
         packet.optional = [3] + destination + [0xFF] + [0]
 
-        if command:
+        if command and rorg == RORG.VLD:
             # Set CMD to command, if applicable.. Helps with VLD.
             kwargs['CMD'] = command
 
@@ -259,12 +263,12 @@ class Packet(object):
             self.repeater_count = enoceanjob.utils.from_bitarray(self._bit_status[4:])
         return self.parsed
 
-    def select_eep(self, rorg_func, rorg_type, direction=None, command=None):
+    def select_eep(self, rorg_func, rorg_type, direction=None, command=None, mid=None):
         ''' Set EEP based on FUNC and TYPE '''
         # set EEP profile
         self.rorg_func = rorg_func
         self.rorg_type = rorg_type
-        self._profile = self.eep.find_profile(self._bit_data, self.rorg, rorg_func, rorg_type, direction, command)
+        self._profile = self.eep.find_profile(self._bit_data, self._bit_status, self.rorg, rorg_func, rorg_type, direction, command, mid)
         return self._profile is not None
 
     def parse_eep(self, rorg_func=None, rorg_type=None, direction=None, command=None):
@@ -291,6 +295,126 @@ class Packet(object):
         ords.append(crc8.calc(ords[6:]))
         return ords
 
+    @staticmethod
+    def create_raw(packet_type, rorg, Raw_Data, direction=None, destination=None,
+               sender=None, status=None):
+        
+        if packet_type != PACKET.RADIO_ERP1:
+            # At least for now, only support PACKET.RADIO_ERP1.
+            raise ValueError('Packet type not supported by this function.')
+        
+        if destination is None:
+            Packet.logger.warning('Replacing destination with broadcast address.')
+            destination = [0xFF, 0xFF, 0xFF, 0xFF]
+
+        if sender is None:
+            #Packet.logger.warning('Replacing sender with default address.')
+            sender = [0x00, 0x00, 0x00, 0x00]
+
+        if not isinstance(destination, list) or len(destination) != 4:
+            raise ValueError('Destination must a list containing 4 (numeric) values.')
+
+        if not isinstance(sender, list) or len(sender) != 4:
+            raise ValueError('Sender must a list containing 4 (numeric) values.')
+        
+        if not isinstance(Raw_Data, list):
+            raise ValueError('Raw_Data must be a list containing numeric values.')
+        
+        packet = Packet(packet_type, data=[], optional=[])
+        packet.rorg = rorg
+        packet.data = [packet.rorg]
+        packet.data.extend(Raw_Data)
+        packet.data.extend(sender)
+        packet.data.extend([0])
+        # Always use sub-telegram 3, maximum dbm (as per spec, when sending),
+        # and no security (security not supported as per EnOcean Serial Protocol).
+        if status is None:
+            packet.optional = [3] + destination + [0xFF] + [0]
+        else:
+            packet.status = status
+            packet.optional = [status] + destination + [0xFF] + [0]
+        
+
+        return packet
+    
+    def decrypt(self, Key, RLC = [], SLF_TI = 0x00, Window_Size = None):
+        Out_packet = Packet(PACKET.RADIO_ERP1, data=[], optional=[])
+        
+        #Parse Sescure Level Format
+        SLF_IN = security.SLF(SLF_TI)
+        if SLF_IN.DATA_ENC!= 3:
+            # At least for now, only support VAES
+            return self, DECRYPT_RESULT.NOT_SUPPORTED
+        
+        #MAC_SIZE is SLC MAC_SIZE value + 2
+        MAC_SIZE = SLF_IN.MAC_ALGO + 2
+        RLC_SIZE = SLF_IN.RLC_ALGO + 1
+        DATA_END = -5 - MAC_SIZE
+
+        #Data fileds extraction and RLC management
+        if Window_Size is None:
+            Window_Size = 0xFFFFFFFF
+
+        if RLC != []:
+            RLC_Start = RLC
+            Window_Size = 0x80
+        else:
+            RLC_Start = [0] * RLC_SIZE
+
+        if SLF_IN.RLC_TX == SLF_INFO.RLC_TX_YES:
+            DATA_END = DATA_END - RLC_SIZE
+            RLC_find = self.data[DATA_END:DATA_END+RLC_SIZE]
+            CMAC = self.data[DATA_END+RLC_SIZE:-5]
+        else:     
+            CMAC = self.data[DATA_END:-5]
+            Data_in = self.data[1:DATA_END]
+            RLC_find = security.find_RLC(Key, self.data[:DATA_END], CMAC, RLC_Start, Window_Size)
+            
+
+        if RLC_find is None:
+            return self, DECRYPT_RESULT.RLC_NOT_FIND, None
+        
+        Data_in = self.data[1:DATA_END]
+        
+        #Encrypt encrypted data = Decrypt data
+        Data_in = security.VAES128(Key, Data_in, RLC_find)
+
+        #Build decrypted packet
+        Out_packet.rorg = Data_in[0]
+        Out_packet.data.extend(Data_in)
+        Out_packet.data.extend(self.data[-5:])
+        Out_packet.optional.extend(self.optional)
+
+        return Out_packet, DECRYPT_RESULT.OK, RLC_find
+    
+    def encrypt(self, Key, RLC = [], SLF_TI = 0x00):
+        Out_packet = Packet(PACKET.RADIO_ERP1, data=[], optional=[])
+
+        #Parse Sescure Level Format
+        SLF_IN = security.SLF(SLF_TI)
+        if SLF_IN.DATA_ENC!= 3:
+            # At least for now, only support VAES
+            self.logger.warn('SLF not supported')
+            return self
+        
+        #MAC_SIZE is SLC MAC_SIZE value + 2
+        MAC_SIZE = SLF_IN.MAC_ALGO + 2
+
+        Data_in = self.data[:-5]
+
+        #Encrypt data
+        Data_in = security.VAES128(Key, Data_in, RLC)
+
+        #Build output packet
+        Out_packet.rorg = RORG.SEC_ENCAPS
+        Out_packet.data.append(Out_packet.rorg)
+        Out_packet.data.extend(Data_in)
+        Out_packet.data.extend(security.CMAC_calc(Key, Out_packet.data, RLC, MAC_SIZE))
+        Out_packet.data.extend(self.data[-5:])
+        Out_packet.optional.extend(self.optional)
+
+        return Out_packet
+     
 
 class RadioPacket(Packet):
     destination = [0xFF, 0xFF, 0xFF, 0xFF]
@@ -305,9 +429,13 @@ class RadioPacket(Packet):
 
     @staticmethod
     def create(rorg, rorg_func, rorg_type, direction=None, command=None,
-               destination=None, sender=None, learn=False, **kwargs):
-        return Packet.create(PACKET.RADIO_ERP1, rorg, rorg_func, rorg_type,
-                             direction, command, destination, sender, learn, **kwargs)
+               destination=None, sender=None, learn=False, mid=None, **kwargs):
+        return Packet.create(PACKET.RADIO_ERP1, rorg, rorg_func, rorg_type, direction, command, destination, sender, learn, mid, **kwargs)
+    
+    @staticmethod
+    def create_raw(rorg, Raw_Data, direction=None, destination=None,
+               sender=None, status=None):
+        return Packet.create_raw(PACKET.RADIO_ERP1, rorg, Raw_Data, direction, destination, sender, status)
 
     @property
     def sender_int(self):
@@ -324,6 +452,12 @@ class RadioPacket(Packet):
     @property
     def destination_hex(self):
         return enoceanjob.utils.to_hex_string(self.destination)
+    
+    def encrypt(self, Key, RLC=[], SLF_TI=0):
+        return super().encrypt(Key, RLC, SLF_TI)
+    
+    def decrypt(self, Key, RLC=[], SLF_TI=0, Window_Size=None):
+        return super().decrypt(Key, RLC, SLF_TI, Window_Size)
 
     def parse(self):
         self.destination = self.optional[1:5]
@@ -346,10 +480,169 @@ class RadioPacket(Packet):
                     self.rorg_func = enoceanjob.utils.from_bitarray(self._bit_data[DB3.BIT_7:DB3.BIT_1])
                     self.rorg_type = enoceanjob.utils.from_bitarray(self._bit_data[DB3.BIT_1:DB2.BIT_2])
                     self.rorg_manufacturer = enoceanjob.utils.from_bitarray(self._bit_data[DB2.BIT_2:DB0.BIT_7])
-                    self.logger.debug('learn received, EEP detected, RORG: 0x%02X, FUNC: 0x%02X, TYPE: 0x%02X, Manufacturer: 0x%02X' % (self.rorg, self.rorg_func, self.rorg_type, self.rorg_manufacturer))  # noqa: E501
+                    self.logger.debug('learn received, EEP detected, RORG: 0x%02X, FUNC: 0x%02X, TYPE: 0x%02X, Manufacturer: 0x%02X' % (self.rorg, self.rorg_func, self.rorg_type, self.rorg_manufacturer))
 
         return super(RadioPacket, self).parse()
 
+
+class SecurePacket(RadioPacket):
+    slf = 0x8B
+    RLC = []
+    CMAC = []
+    key = []
+
+    def __str__(self):
+        packet_str = super(RadioPacket, self).__str__()
+        return '%s : %s->%s (%d dBm): %s' % ("SEC",self.sender_hex, self.destination_hex, self.dBm, packet_str)
+
+    def parse(self):
+        super(SecurePacket, self).parse()
+        return self.parsed
+
+#Packet subclass for chained messages management
+#Parse id, index and data length
+class ChainedMSG(RadioPacket):
+    
+    id = 0b01
+    idx = 0b000000
+    chain_len = 0x0000
+    id_chain = 0b01
+
+    def __str__(self):
+        packet_str = super(ChainedMSG, self).__str__()
+        return '%s %d-%d : %s->%s (%d dBm): %s' % ("CDM",self.id,self.idx,self.sender_hex, self.destination_hex, self.dBm, packet_str)
+
+    @staticmethod
+    def create_CDM(over_sized_packt, CDM_RORG=RORG.SEC_CDM):
+        if len(over_sized_packt.data) <= 15 and over_sized_packt.destination != [0xFF,0xFF,0xFF,0xFF]:
+            return over_sized_packt
+        
+        Start = 1
+        chained_list = []
+
+        data_len = len(over_sized_packt.data) - 6
+
+        CHAIN_CTRL = (ChainedMSG.id_chain << 6) | 0x00
+        header = [CDM_RORG] + [CHAIN_CTRL] + list(data_len.to_bytes(2, 'big'))
+
+        if CDM_RORG == RORG.CDM:
+            Start = 0
+
+        data = over_sized_packt.data[Start:-5]
+        
+        data_i = header + data[:10-len(header)] + over_sized_packt.data[-5:]
+        chained_list.append(ChainedMSG(PACKET.RADIO_ERP1,data=data_i, optional=over_sized_packt.optional))
+        data = data[10-len(header):]
+        
+        N=math.ceil(len(data)/8)
+
+        for i in range(N-1):
+            CHAIN_CTRL = (ChainedMSG.id_chain << 6) | (i+1)
+            header = [CDM_RORG] + [CHAIN_CTRL] + over_sized_packt.data[-5:]
+            data_i = header + data[i*8:i*8+1]
+            chained_list.append(ChainedMSG(PACKET.RADIO_ERP1,data=data_i, optional=over_sized_packt.optional))
+
+        CHAIN_CTRL = (ChainedMSG.id_chain << 6) | N
+        header = [CDM_RORG] + [CHAIN_CTRL]
+        data_i = header + data[-(len(data)%8):] + over_sized_packt.data[-5:]
+        chained_list.append(ChainedMSG(PACKET.RADIO_ERP1,data=data_i, optional=over_sized_packt.optional))
+
+        ChainedMSG.id_chain += 1
+        if ChainedMSG.id_chain == 4: ChainedMSG.id_chain = 1
+
+        return chained_list
+
+    def parse(self):
+        super(ChainedMSG, self).parse()
+        self.id = (self.data[1] & 0xC0) >> 6
+        self.idx = self.data[1] & 0x3F
+        if self.idx == 0:
+            self.chain_len = (self.data[2] << 8) + self.data[3]
+        return self.parsed
+
+#Packet subclass for merged chained messages management
+#VIRTUAL prefix
+class VirtualPacket(RadioPacket):
+
+    def __str__(self):
+        packet_str = super(VirtualPacket, self).__str__()
+        return '%s : %s->%s (%d dBm): %s' % ("VIRTUAL", self.sender_hex, self.destination_hex, self.dBm, packet_str)
+    
+    def parse(self):
+        super(VirtualPacket, self).parse()
+        return self.parsed
+
+# Class for chained messages merging and creation
+class MSGChainer(object):
+    
+    def __init__(self):
+        self.chainid = None
+        self.chainidx = None
+        self.chained_data = []
+        self.remaining_size = None
+
+    def parse_CDM(self, packet):
+
+        #If not a chained message packet do nothing
+        if not isinstance(packet, ChainedMSG):
+            return None
+        
+        #If the first chained packet is not the first of the chain (index > 0)
+        # do nothing
+        if self.chained_data == [] and packet.idx > 0:
+            return None
+
+        #Chain Encapsulation Size
+        if packet.rorg == RORG.SEC_CDM: 
+            CES = 9
+        #if CDM 0x40 RORG of chained message is added to the data
+        else: 
+            CES = 10
+
+        #If it is the first message of the chain
+        if packet.idx == 0:
+            self.chained_data.clear()
+            self.chainid = packet.id
+            self.chainidx = packet.idx
+            self.remaining_size = packet.chain_len - (len(packet.data) - CES)
+            if packet.rorg == RORG.SEC_CDM: self.chained_data.extend([RORG.SEC_ENCAPS._value_])
+            self.chained_data.extend(packet.data[4:-5])
+        #Rest of the chain if same chian id and idx + 1
+        elif packet.id == self.chainid and packet.idx == (self.chainidx + 1):
+            self.remaining_size -= (len(packet.data) - 7)
+            self.chained_data.extend(packet.data[2:])
+
+        if self.remaining_size == 0:
+            return VirtualPacket(PACKET.RADIO_ERP1,data=self.chained_data, optional=packet.optional)
+        
+        return None
+    
+    def assemble_SEC_TI(self, sec_ti_chain):
+        
+        #If not a chained message packet do nothing
+        if not isinstance(sec_ti_chain, SECTeachInPacket):
+            return None
+        
+        #If the first chained packet is not the first of the chain (index > 0)
+        # do nothing
+        if self.chained_data == [] and sec_ti_chain.IDX > 0:
+            return None      
+
+        if sec_ti_chain.idx == 0:
+            self.chained_data.clear()
+            self.remaining_size = sec_ti_chain.CNT
+            self.chained_data.extend(sec_ti_chain.data[1:-5])
+
+
+        self.chained_data.extend(sec_ti_chain.data[2:-5])
+        self.remaining_size -= 1
+
+        if self.remaining_size == 0:
+            return SECTeachInPacket(PACKET.RADIO_ERP1,data=self.chained_data,optional=sec_ti_chain.optional)
+        
+        return None
+
+        
 
 class UTETeachInPacket(RadioPacket):
     # Request types
@@ -389,7 +682,7 @@ class UTETeachInPacket(RadioPacket):
         self.unidirectional = not self._bit_data[DB6.BIT_7]
         self.response_expected = not self._bit_data[DB6.BIT_6]
         self.request_type = enoceanjob.utils.from_bitarray(self._bit_data[DB6.BIT_5:DB6.BIT_3])
-        self.rorg_manufacturer = enoceanjob.utils.from_bitarray(self._bit_data[DB3.BIT_2:DB2.BIT_7] + self._bit_data[DB4.BIT_7:DB3.BIT_7])  # noqa: E501
+        self.rorg_manufacturer = enoceanjob.utils.from_bitarray(self._bit_data[DB3.BIT_2:DB2.BIT_7] + self._bit_data[DB4.BIT_7:DB3.BIT_7])
         self.channel = self.data[2]
         self.rorg_type = self.data[5]
         self.rorg_func = self.data[6]
@@ -413,6 +706,75 @@ class UTETeachInPacket(RadioPacket):
         optional = [0x03] + self.sender + [0xFF, 0x00]
 
         return RadioPacket(PACKET.RADIO_ERP1, data=data, optional=optional)
+
+class SECTeachInPacket(RadioPacket):
+
+    SLF=None
+    RLC=[]
+    KEY=[]
+    IDX=None
+    CNT=None
+    PSK=None
+    TYPE=None
+    INFO=None
+
+    @staticmethod
+    def create_SECTI_chain(rorg=0x35, RLC=None, SLF=None, PSK=0, TYPE=0, INFO=0,sender=None, destination=None):
+        SLF_IN = security.SLF(SLF)
+        if RLC == None:
+            RLC = [0x00] * (SLF_IN.RLC_ALGO + 1)
+        else:
+            RLC = RLC[-(SLF_IN.RLC_ALGO + 1):]
+
+        if sender is None:
+            sender = [0x00] * 4
+        
+        if destination is None:
+            destination = [0xFF] * 4
+
+        # Key = get_random_bytes(16)
+        Key = bytearray.fromhex("869FAB7D296C9E48CEBFF34DF637358A")
+
+        data = [SLF] + RLC + list(Key) #+ sender + [0x00]
+        optional = [0x03] + destination + [0xFF, 0x00]
+
+        sec_ti_list = []
+        N = math.ceil(len(data)/8)
+        PTI = (PSK << 3) | (TYPE << 2) | (INFO & 0x03)
+
+        TINFO = (N << 4) | PTI
+        assemble_packet = SECTeachInPacket(PACKET.RADIO_ERP1, data=[rorg] + [TINFO] + data + sender + [0x00],optional=optional)
+
+        for i in range(N-1):
+            idx = i << 6
+            if i == 0:
+                cnt = N << 4
+            else:
+                cnt=0
+            TINFO = idx | cnt | PTI
+            data_i = [rorg] + [TINFO] + data[i*8:i*8+8] + sender + [0x00]
+            sec_ti_list.append(SECTeachInPacket(PACKET.RADIO_ERP1, data=data_i, optional=optional))
+
+        data_last = [rorg] + [TINFO + 0x40] + data[-(len(data)%8):]  + sender + [0x00]
+        sec_ti_list.append(SECTeachInPacket(PACKET.RADIO_ERP1, data=data_last, optional=optional))
+
+        return sec_ti_list, assemble_packet
+    
+    def parse(self):
+        self.IDX = self.data[1] >> 6
+        self.CNT = (self.data[1] & 0x30) >> 4
+        self.PSK = (self.data[1] & 0x08) >> 3
+        self.TYPE = (self.data[1] & 0x04) >> 2
+        self.INFO = self.data[1] & 0x03
+        if len(self.data) > 15:
+            SLF_IN = security.SLF(self.data[2])
+            self.SLF = self.data[2]
+            self.RLC = self.data[3:-21]
+            self.KEY = self.data[-21:-5]
+        return super(SECTeachInPacket, self).parse()
+
+
+
 
 
 class ResponsePacket(Packet):

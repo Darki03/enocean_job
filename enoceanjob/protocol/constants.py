@@ -60,6 +60,8 @@ class RORG(IntEnum):
     SEC = 0x30
     SEC_ENCAPS = 0x31
     UTE = 0xD4
+    CDM = 0x40
+    SEC_CDM = 0x33
 
 
 # Results for message parsing
@@ -67,6 +69,17 @@ class PARSE_RESULT(IntEnum):
     OK = 0x00
     INCOMPLETE = 0x01
     CRC_MISMATCH = 0x03
+
+# Results for message encrypt/decrypt
+class DECRYPT_RESULT(IntEnum):
+    OK = 0x00
+    RLC_NOT_FIND = 0x01
+    CMAC_KO = 0x02
+    NOT_SUPPORTED = 0x03
+
+class CHAINED_RESULT(IntEnum):
+    OK = 0x00
+    INCOMPLETE = 0x01
 
 
 # Data byte indexing
@@ -146,3 +159,13 @@ class DB6(object):
     BIT_5 = -54
     BIT_6 = -55
     BIT_7 = -56
+
+class SLF_INFO(IntEnum):
+    RLC_ALGO_16p1 = 1
+    RLC_ALGO_24p1 = 2
+    RLC_ALGO_32p1 = 3
+    RLC_TX_NO = 0
+    RLC_TX_YES = 1
+    MAC_ALGO_NO = 0
+    MAC_ALGO_3 = 1
+    MAC_ALGO_4 = 2

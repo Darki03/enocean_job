@@ -7,7 +7,7 @@ import logging.handlers
 def init_logging(level=logging.DEBUG, log_to_file=False, logsize=1024, logcount=5):
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    logger = logging.getLogger('enocean')
+    logger = logging.getLogger('enoceanjob')
     logger.setLevel(level)
 
     stream_handler = logging.StreamHandler()

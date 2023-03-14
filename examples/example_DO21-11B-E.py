@@ -2,7 +2,7 @@
 # -*- encoding: utf-8 -*-
 '''
 Example to show automatic UTE Teach-in responses using
-http://www.g-media.fr/prise-gigogne-enocean.html
+http://www.g-media.fr/prise-gigogne-enoceanjob.html
 
 Waits for UTE Teach-ins, sends the response automatically and prints the ID of new device.
 '''
@@ -10,10 +10,10 @@ Waits for UTE Teach-ins, sends the response automatically and prints the ID of n
 import sys
 import time
 import traceback
-import enocean.utils
-from enocean.communicators import SerialCommunicator
-from enocean.protocol.packet import RadioPacket, UTETeachInPacket
-from enocean.protocol.constants import RORG
+import enoceanjob.utils
+from enoceanjob.communicators import SerialCommunicator
+from enoceanjob.protocol.packet import RadioPacket, UTETeachInPacket
+from enoceanjob.protocol.constants import RORG
 
 try:
     import queue
@@ -38,7 +38,7 @@ def turn_off(destination):
 
 communicator = SerialCommunicator()
 communicator.start()
-print('The Base ID of your module is %s.' % enocean.utils.to_hex_string(communicator.base_id))
+print('The Base ID of your module is %s.' % enoceanjob.utils.to_hex_string(communicator.base_id))
 
 # Example of turning switches on and off
 turn_on([0x01, 0x94, 0xB9, 0x46])
@@ -71,7 +71,7 @@ while communicator.is_alive():
         traceback.print_exc(file=sys.stdout)
         break
 
-print('Devices learned during this session: %s' % (', '.join([enocean.utils.to_hex_string(x) for x in devices_learned])))
+print('Devices learned during this session: %s' % (', '.join([enoceanjob.utils.to_hex_string(x) for x in devices_learned])))
 
 if communicator.is_alive():
     communicator.stop()

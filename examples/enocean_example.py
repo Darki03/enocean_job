@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-from enocean.consolelogger import init_logging
-import enocean.utils
-from enocean.communicators.serialcommunicator import SerialCommunicator
-from enocean.protocol.packet import RadioPacket
-from enocean.protocol.constants import PACKET, RORG
+from enoceanjob.consolelogger import init_logging
+import enoceanjob.utils
+from enoceanjob.communicators.serialcommunicator import SerialCommunicator
+from enoceanjob.protocol.packet import RadioPacket
+from enoceanjob.protocol.constants import PACKET, RORG
+
 import sys
 import traceback
 
@@ -25,7 +26,7 @@ def assemble_radio_packet(transmitter_id):
 init_logging()
 communicator = SerialCommunicator()
 communicator.start()
-print('The Base ID of your module is %s.' % enocean.utils.to_hex_string(communicator.base_id))
+print('The Base ID of your module is %s.' % enoceanjob.utils.to_hex_string(communicator.base_id))
 
 if communicator.base_id is not None:
     print('Sending example package.')

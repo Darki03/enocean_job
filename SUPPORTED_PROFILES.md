@@ -1,5 +1,5 @@
 # Supported profiles
-All profiles (should) correspond to the official [EEP](http://www.enocean-alliance.org/eep/) by EnOcean.
+All profiles (should) correspond to the official [EEP](http://www.enocean-alliance.org/eep/) by enoceanjob.
 
 ### RPS Telegram (0xF6)
 ##### RORG 0xF6 - FUNC 0x01 - TYPE 0x01 - Push Button

@@ -6,13 +6,13 @@ from sys import version_info
 from collections import OrderedDict
 from bs4 import BeautifulSoup
 
-import enocean.utils
+import enoceanjob.utils
 # Left as a helper
-from enocean.protocol.constants import RORG  # noqa: F401
+from enoceanjob.protocol.constants import RORG  # noqa: F401
 
 
 class EEP(object):
-    logger = logging.getLogger('enocean.protocol.eep')
+    logger = logging.getLogger('enoceanjob.protocol.eep')
 
     def __init__(self):
         self.init_ok = False
@@ -37,9 +37,9 @@ class EEP(object):
 
     def __load_xml(self):
         self.telegrams = {
-            enocean.utils.from_hex_string(telegram['rorg']): {
-                enocean.utils.from_hex_string(function['func']): {
-                    enocean.utils.from_hex_string(type['type'], ): type
+            enoceanjob.utils.from_hex_string(telegram['rorg']): {
+                enoceanjob.utils.from_hex_string(function['func']): {
+                    enoceanjob.utils.from_hex_string(type['type'], ): type
                     for type in function.find_all('profile')
                 }
                 for function in telegram.find_all('profiles')

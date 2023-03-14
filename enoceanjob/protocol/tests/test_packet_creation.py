@@ -2,9 +2,9 @@
 from __future__ import print_function, unicode_literals, division, absolute_import
 from nose.tools import raises
 
-from enocean.protocol.packet import Packet, RadioPacket
-from enocean.protocol.constants import PACKET, RORG
-from enocean.decorators import timing
+from enoceanjob.protocol.packet import Packet, RadioPacket
+from enoceanjob.protocol.constants import PACKET, RORG
+from enoceanjob.decorators import timing
 
 
 @timing(1000)

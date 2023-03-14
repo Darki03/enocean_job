@@ -1,10 +1,10 @@
 # -*- encoding: utf-8 -*-
 from __future__ import print_function, unicode_literals, division, absolute_import
 
-from enocean.communicators import Communicator
-from enocean.protocol.packet import Packet
-from enocean.protocol.constants import RORG, DB6
-from enocean.decorators import timing
+from enoceanjob.communicators import Communicator
+from enoceanjob.protocol.packet import Packet
+from enoceanjob.protocol.constants import RORG, DB6
+from enoceanjob.decorators import timing
 
 
 @timing(rounds=100, limit=750)

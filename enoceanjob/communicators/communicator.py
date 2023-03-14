@@ -8,16 +8,17 @@ try:
     import queue
 except ImportError:
     import Queue as queue
-from enocean.protocol.packet import Packet, UTETeachInPacket
-from enocean.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
+
+from enoceanjob.protocol.packet import Packet, UTETeachInPacket
+from enoceanjob.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 
 
 class Communicator(threading.Thread):
     '''
-    Communicator base-class for EnOcean.
+    Communicator base-class for enoceanjob.
     Not to be used directly, only serves as base class for SerialCommunicator etc.
     '''
-    logger = logging.getLogger('enocean.communicators.Communicator')
+    logger = logging.getLogger('enoceanjob.communicators.Communicator')
 
     def __init__(self, callback=None, teach_in=True):
         super(Communicator, self).__init__()

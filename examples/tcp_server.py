@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-from enocean.consolelogger import init_logging
-from enocean.communicators.tcpcommunicator import TCPCommunicator
-from enocean.protocol.constants import PACKET, RORG
+from enoceanjob.consolelogger import init_logging
+from enoceanjob.communicators.tcpcommunicator import TCPCommunicator
+from enoceanjob.protocol.constants import PACKET, RORG
 import sys
 import traceback
 

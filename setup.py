@@ -5,16 +5,16 @@ except ImportError:
     from distutils.core import setup
 
 setup(
-    name='enocean',
+    name='enoceanjob',
     version='0.60.1',
     description='EnOcean serial protocol implementation',
     author='Kimmo Huoman',
-    author_email='kipenroskaposti@gmail.com',
-    url='https://github.com/kipe/enocean',
+    author_email='jo.binon@gmail.com',
+    url='https://github.com/Darki03/enocean_job',
     packages=[
-        'enocean',
-        'enocean.protocol',
-        'enocean.communicators',
+        'enoceanjob',
+        'enoceanjob.protocol',
+        'enoceanjob.communicators',
     ],
     scripts=[
         'examples/enocean_example.py',

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-from enocean.consolelogger import init_logging
-from enocean.communicators.serialcommunicator import SerialCommunicator
-from enocean.communicators.utils import send_to_tcp_socket
+from enoceanjob.consolelogger import init_logging
+from enoceanjob.communicators.serialcommunicator import SerialCommunicator
+from enoceanjob.communicators.utils import send_to_tcp_socket
 import sys
 import traceback
 

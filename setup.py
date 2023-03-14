@@ -6,7 +6,7 @@ except ImportError:
 
 setup(
     name='enoceanjob',
-    version='0.60.2',
+    version='0.60.3',
     description='EnOcean serial protocol implementation',
     author='Kimmo Huoman',
     author_email='jo.binon@gmail.com',
@@ -21,6 +21,7 @@ setup(
     ],
     package_data={
         '': ['EEP.xml']
+        '': ['eep268.xml']
     },
     install_requires=[
         'enum-compat>=0.0.2',

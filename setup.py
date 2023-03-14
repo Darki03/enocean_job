@@ -6,7 +6,7 @@ except ImportError:
 
 setup(
     name='enoceanjob',
-    version='0.60.1',
+    version='0.60.2',
     description='EnOcean serial protocol implementation',
     author='Kimmo Huoman',
     author_email='jo.binon@gmail.com',

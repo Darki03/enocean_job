@@ -20,7 +20,7 @@ setup(
         'examples/enocean_example.py',
     ],
     package_data={
-        '': ['EEP.xml']
+        '': ['EEP.xml'],
         '': ['eep268.xml']
     },
     install_requires=[

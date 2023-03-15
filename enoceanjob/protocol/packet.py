@@ -353,13 +353,13 @@ class Packet(object):
 
         #Data fileds extraction and RLC management
         if Window_Size is None:
-            Window_Size = 0xFFFFFFFF
+            Window_Size = 0xFF
 
         if RLC != []:
             RLC_Start = RLC
             Window_Size = 0x80
         else:
-            RLC_Start = [0] * RLC_SIZE
+            RLC_Start = [0x00] * RLC_SIZE
 
         if SLF_IN.RLC_TX == SLF_INFO.RLC_TX_YES:
             DATA_END = DATA_END - RLC_SIZE

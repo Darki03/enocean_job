@@ -102,7 +102,10 @@ class Communicator(threading.Thread):
                 if isinstance(packet, ChainedMSG):
                     virtual = self.chained.parse_CDM(packet)
                     if virtual:
-                        self.receive.put(virtual)
+                        if self.__callback is None:
+                            self.receive.put(virtual)
+                        else:
+                            self.__callback(virtual)
                         self.logger.debug(virtual)
 
     @property

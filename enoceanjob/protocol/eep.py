@@ -23,7 +23,7 @@ class EEP(object):
                     xml_file.readline()
                     self.soup = BeautifulSoup(xml_file.read(), features='xml')
             else:
-                with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'eep268.xml'), 'r') as xml_file:
+                with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'eep268.xml'), 'r', encoding='UTF-16LE') as xml_file:
                     xml_file.readline()
                     self.soup = BeautifulSoup(xml_file.read(), features='xml') #"html.parser")
             self.init_ok = True

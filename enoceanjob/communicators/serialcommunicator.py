@@ -39,5 +39,6 @@ class SerialCommunicator(Communicator):
             self.parse()
             time.sleep(0)
 
+        self.__ser.read_all() #flush input
         self.__ser.close()
         self.logger.info('SerialCommunicator stopped')

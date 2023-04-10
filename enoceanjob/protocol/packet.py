@@ -721,7 +721,7 @@ class SECTeachInPacket(RadioPacket):
     @staticmethod
     def create_SECTI_chain(rorg=0x35, Key=None, RLC=None, SLF=None, PSK=0, TYPE=0, INFO=0,sender=None, destination=None):
         SLF_IN = security.SLF(SLF)
-        
+
         if RLC == None:
             RLC = [0x00] * (SLF_IN.RLC_ALGO + 1)
         else:
@@ -734,10 +734,10 @@ class SECTeachInPacket(RadioPacket):
             destination = [0xFF] * 4
 
         if Key is None:
-            Key = get_random_bytes(16)
+            Key = list(get_random_bytes(16))
             #Key = bytearray.fromhex("869FAB7D296C9E48CEBFF34DF637358A")
 
-        data = [SLF] + RLC + list(Key) #+ sender + [0x00]
+        data = [SLF] + RLC + Key #+ sender + [0x00]
         optional = [0x03] + destination + [0xFF, 0x00]
 
         sec_ti_list = []

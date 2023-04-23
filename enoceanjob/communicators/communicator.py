@@ -2,12 +2,14 @@
 from __future__ import print_function, unicode_literals, division, absolute_import
 import logging
 import datetime
+import time
 
 import threading
 try:
     import queue
 except ImportError:
     import Queue as queue
+from typing import Any
 from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG
 from enoceanjob.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 
@@ -32,6 +34,12 @@ class Communicator(threading.Thread):
         self.__callback = callback
         # Internal variable for the Base ID of the module.
         self._base_id = None
+        self._dgl_info: dict[str, Any] = {}
+        self._dgl_info['app_version'] = "unknown"
+        self._dgl_info['api_version'] = "unknown"
+        self._dgl_info['chip_id'] = [0x00] * 4
+        self._dgl_info['app_descr'] = "unknown"
+        self._dgl_info['base_id'] = [0xFF] * 4
         # Should new messages be learned automatically? Defaults to True.
         # TODO: Not sure if we should use CO_WR_LEARNMODE??
         self.teach_in = teach_in
@@ -67,6 +75,7 @@ class Communicator(threading.Thread):
                 self.logger.warn('Object in the list is not a Packet')
                 continue
             self.transmit.put(pckt)
+            time.sleep(0.05)
         
         return True
 
@@ -108,15 +117,11 @@ class Communicator(threading.Thread):
                             self.__callback(virtual)
                         self.logger.debug(virtual)
 
-    @property
-    def base_id(self):
-        ''' Fetches Base ID from the transmitter, if required. Otherwise returns the currently set Base ID. '''
-        # If base id is already set, return it.
-        if self._base_id is not None:
-            return self._base_id
-
-        # Send COMMON_COMMAND 0x08, CO_RD_IDBASE request to the module
+    def get_dongle_info(self) -> dict[str, Any]:
+        ''' Fetches dongle information using CO_RD_VERSION and CO_RD_IDBASE'''
+        # Send COMMON_COMMAND 0x03, CO_RD_VERSION request to the module
         self.send(Packet(PACKET.COMMON_COMMAND, data=[0x03]))
+
         # Loop over 10 times, to make sure we catch the response.
         # Thanks to timeout, shouldn't take more than a second.
         # Unfortunately, all other messages received during this time are ignored.
@@ -125,19 +130,63 @@ class Communicator(threading.Thread):
                 packet = self.receive.get(block=True, timeout=0.1)
                 # We're only interested in responses to the request in question.
                 if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK and len(packet.response_data) == 32:
-                    # Base ID is set in the response data.
-                    self._base_id = packet.response_data[8:12]
-                    # Put packet back to the Queue, so the user can also react to it if required...
-                    self.receive.put(packet)
+                    # Dongle info is set in the response data.
+                    self._dgl_info['app_version'] = '.'.join(str(v) for v in packet.response_data[0:4])
+                    self._dgl_info['api_version'] = '.'.join(str(v) for v in packet.response_data[4:8])
+                    self._dgl_info['chip_id'] = packet.response_data[8:12]
+                    self._dgl_info['app_descr'] = ''.join(bytearray(packet.response_data[16:32]).decode('utf-8'))
                     break
                 # Put other packets back to the Queue.
                 self.receive.put(packet)
             except queue.Empty:
                 continue
-        # Return the current Base ID (might be None).
-        return self._base_id
+        
+        # Send COMMON_COMMAND 0x08, CO_RD_IDBASE request to the module
+        self.send(Packet(PACKET.COMMON_COMMAND, data=[0x08]))
+
+        # Loop over 10 times, to make sure we catch the response.
+        # Thanks to timeout, shouldn't take more than a second.
+        # Unfortunately, all other messages received during this time are ignored.
+        for i in range(0, 10):
+            try:
+                packet = self.receive.get(block=True, timeout=0.1)
+                # We're only interested in responses to the request in question.
+                print(packet)
+                if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK and len(packet.response_data) == 4:
+                    # Base ID is set in the response data.
+                    self._dgl_info['base_id'] = packet.response_data
+                    break
+                # Put other packets back to the Queue.
+                self.receive.put(packet)
+            except queue.Empty:
+                continue
+
+        return self._dgl_info
+
+    @property
+    def base_id(self):
+        ''' Dongle base id, return base ID of the dongle'''
+        return self._dgl_info['base_id']
 
     @base_id.setter
     def base_id(self, base_id):
         ''' Sets the Base ID manually, only for testing purposes. '''
         self._base_id = base_id
+
+    @property
+    def eurid(self):
+        ''' Dongle CHIP ID (EnOcean Unique Radio Identifier – EURID) '''
+        return self._dgl_info['chip_id']
+
+    @property
+    def app_version(self):
+        return self._dgl_info['app_version']
+    
+    @property
+    def api_version(self):
+        return self._dgl_info['api_version']
+    
+    @property
+    def app_description(self):
+        return self._dgl_info['app_descr']
+    

@@ -307,6 +307,7 @@ class Packet(object):
             Packet.logger.warning('Replacing destination with broadcast address.')
             destination = [0xFF, 0xFF, 0xFF, 0xFF]
 
+        #Sends packet with EURID by default (sender address different from base ID start address)
         if sender is None:
             #Packet.logger.warning('Replacing sender with default address.')
             sender = [0x00, 0x00, 0x00, 0x00]
@@ -351,7 +352,7 @@ class Packet(object):
         RLC_SIZE = SLF_IN.RLC_ALGO + 1
         DATA_END = -5 - MAC_SIZE
 
-        #Data fileds extraction and RLC management
+        #Data fields extraction and RLC management
         if Window_Size is None:
             Window_Size = 0xFF
 
@@ -370,9 +371,9 @@ class Packet(object):
             Data_in = self.data[1:DATA_END]
             RLC_find = security.find_RLC(Key, self.data[:DATA_END], CMAC, RLC_Start, Window_Size)
             
-
+        #RLC not retrieved, return input RLC and derypt result KO
         if RLC_find is None:
-            return self, DECRYPT_RESULT.RLC_NOT_FIND, None
+            return self, DECRYPT_RESULT.RLC_NOT_FIND, RLC
         
         Data_in = self.data[1:DATA_END]
         

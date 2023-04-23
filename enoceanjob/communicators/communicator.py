@@ -10,7 +10,7 @@ try:
 except ImportError:
     import Queue as queue
 from typing import Any
-from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG
+from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG, ResponsePacket
 from enoceanjob.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 
 
@@ -100,10 +100,14 @@ class Communicator(threading.Thread):
                     self.logger.info('Sending response to UTE teach-in.')
                     self.send(response_packet)
 
-
+                #If no callback defined for comunicator instanciation put packet in the receive queue
                 if self.__callback is None:
                     self.receive.put(packet)
+                #Else pass the packet to the callback function
                 else:
+                    #If packet is a response from the module put it in the queue (necessary for dongle info to work with callback)
+                    if isinstance(packet, ResponsePacket):
+                        self.receive.put(packet)
                     self.__callback(packet)
                 
                 self.logger.debug(packet)

@@ -167,7 +167,7 @@ class Packet(object):
     def create(packet_type, rorg, rorg_func, rorg_type, direction=None, command=None,
                destination=None,
                sender=None,
-               learn=False, mid=None, **kwargs):
+               learn=False, **kwargs):
         '''
         Creates an packet ready for sending.
         Uses rorg, rorg_func and rorg_type to determine the values set based on EEP.
@@ -210,6 +210,12 @@ class Packet(object):
         packet = Packet(packet_type, data=[], optional=[])
         packet.rorg = rorg
         packet.data = [packet.rorg]
+
+        #Set message ID if any
+        mid = None
+        if kwargs['MID'] is not None:
+            mid = kwargs['MID']
+        
         # Select EEP at this point, so we know how many bits we're dealing with (for VLD).
         packet.select_eep(rorg_func, rorg_type, direction, command, mid)
 
@@ -430,8 +436,8 @@ class RadioPacket(Packet):
 
     @staticmethod
     def create(rorg, rorg_func, rorg_type, direction=None, command=None,
-               destination=None, sender=None, learn=False, mid=None, **kwargs):
-        return Packet.create(PACKET.RADIO_ERP1, rorg, rorg_func, rorg_type, direction, command, destination, sender, learn, mid, **kwargs)
+               destination=None, sender=None, learn=False, **kwargs):
+        return Packet.create(PACKET.RADIO_ERP1, rorg, rorg_func, rorg_type, direction, command, destination, sender, learn, **kwargs)
     
     @staticmethod
     def create_raw(rorg, Raw_Data, direction=None, destination=None,

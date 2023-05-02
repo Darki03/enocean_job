@@ -78,6 +78,12 @@ class Communicator(threading.Thread):
             time.sleep(0.05)
         
         return True
+    
+    def send_secure_teach_in(self):
+        pass
+
+    def send_encrypt(self):
+        pass
 
     def stop(self):
         self._stop_flag.set()
@@ -95,6 +101,7 @@ class Communicator(threading.Thread):
             if status == PARSE_RESULT.OK and packet:
                 packet.received = datetime.datetime.now()
 
+                #If received packet is UTETeachIn create response and send it (using base_id)
                 if isinstance(packet, UTETeachInPacket) and self.teach_in:
                     response_packet = packet.create_response_packet(self.base_id)
                     self.logger.info('Sending response to UTE teach-in.')
@@ -112,6 +119,7 @@ class Communicator(threading.Thread):
                 
                 self.logger.debug(packet)
 
+                # Manage received chained messages (compile messsages in a virtual packet and put it in the queue or pass to callback)
                 if isinstance(packet, ChainedMSG):
                     virtual = self.chained.parse_CDM(packet)
                     if virtual:
@@ -122,7 +130,7 @@ class Communicator(threading.Thread):
                         self.logger.debug(virtual)
 
     def get_dongle_info(self) -> dict[str, Any]:
-        ''' Fetches dongle information using CO_RD_VERSION and CO_RD_IDBASE'''
+        ''' Fetches transmitter information using CO_RD_VERSION and CO_RD_IDBASE'''
         # Send COMMON_COMMAND 0x03, CO_RD_VERSION request to the module
         self.send(Packet(PACKET.COMMON_COMMAND, data=[0x03]))
 
@@ -155,7 +163,6 @@ class Communicator(threading.Thread):
             try:
                 packet = self.receive.get(block=True, timeout=0.1)
                 # We're only interested in responses to the request in question.
-                print(packet)
                 if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK and len(packet.response_data) == 4:
                     # Base ID is set in the response data.
                     self._dgl_info['base_id'] = packet.response_data
@@ -166,6 +173,32 @@ class Communicator(threading.Thread):
                 continue
 
         return self._dgl_info
+
+    def set_transparent_mode(self, TM: int=0x01) -> bool:
+        '''Function: This command enables/disables transparent mode. In general it disables chaining, 
+           encryption and remote management functions and will forward all received telegrams into 
+           the ESP3 interface without any processing applied.'''
+        response: bool = False
+
+        # Send COMMON_COMMAND 0x08, CO_WR_TRANSPARENT_MODE request to the module
+        self.send(Packet(PACKET.COMMON_COMMAND, data=[0x3E, TM]))
+
+        # Loop over 10 times, to make sure we catch the response.
+        # Thanks to timeout, shouldn't take more than a second.
+        # Unfortunately, all other messages received during this time are ignored.
+        for i in range(0, 10):
+            try:
+                packet = self.receive.get(block=True, timeout=0.1)
+                # We're only interested in responses to the request in question.
+                if packet.packet_type == PACKET.RESPONSE and packet.response == RETURN_CODE.OK:
+                    response = True
+                    break
+                # Put other packets back to the Queue.
+                self.receive.put(packet)
+            except queue.Empty:
+                continue
+        '''TCM310 USB modules responds NOT_SUPPORTED but transparent mode seems to be active'''
+        return response
 
     @property
     def base_id(self):
@@ -184,13 +217,16 @@ class Communicator(threading.Thread):
 
     @property
     def app_version(self):
+        '''Transmitter application version'''
         return self._dgl_info['app_version']
     
     @property
     def api_version(self):
+        '''Transmitter API version'''
         return self._dgl_info['api_version']
     
     @property
     def app_description(self):
+        '''Transmitter application description'''
         return self._dgl_info['app_descr']
     

@@ -392,6 +392,8 @@ class Packet(object):
         Out_packet.data.extend(self.data[-5:])
         Out_packet.optional.extend(self.optional)
 
+        Out_packet = Packet.parse_msg(Out_packet.build())[2]
+
         return Out_packet, DECRYPT_RESULT.OK, RLC_find
     
     def encrypt(self, Key, RLC = [], SLF_TI = 0x00):
@@ -419,6 +421,8 @@ class Packet(object):
         Out_packet.data.extend(security.CMAC_calc(Key, Out_packet.data, RLC, MAC_SIZE))
         Out_packet.data.extend(self.data[-5:])
         Out_packet.optional.extend(self.optional)
+
+        Out_packet = Packet.parse_msg(Out_packet.build())[2]
 
         return Out_packet
      

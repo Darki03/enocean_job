@@ -10,7 +10,7 @@ try:
 except ImportError:
     import Queue as queue
 from typing import Any
-from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG, ResponsePacket
+from enoceanjob.protocol.packet import Packet, UTETeachInPacket, MSGChainer, ChainedMSG, ResponsePacket, RadioPacket
 from enoceanjob.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 
 
@@ -198,6 +198,30 @@ class Communicator(threading.Thread):
             except queue.Empty:
                 continue
         '''TCM310 USB modules responds NOT_SUPPORTED but transparent mode seems to be active'''
+        return response
+    
+    def send_request(self,command: RadioPacket) -> RadioPacket | bool:
+        """Send a request to a device and get response telegram
+            Return false if no response"""
+
+        response = False
+
+        self.send(command)
+
+        for i in range(0, 10):
+            try:
+                packet = self.receive.get(block=True, timeout=0.1)
+                # We're only interested in responses to the request in question.
+                if packet.packet_type == PACKET.RADIO_ERP1 and packet.sender_hex == command.destination_hex:
+                    print("sender: ", packet.sender_hex)
+                    response = packet
+                    break
+                    #return packet
+                # Put other packets back to the Queue.
+                #self.receive.put(packet)
+            except queue.Empty:
+                continue
+
         return response
 
     @property
